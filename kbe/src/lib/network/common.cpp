@@ -2,6 +2,8 @@
 
 
 #include "common.h"
+#include "common/ssl.h"
+#include "network/http_utility.h"
 #include "network/channel.h"
 #include "network/bundle.h"
 #include "network/tcp_packet.h"
@@ -22,6 +24,21 @@ float g_channelExternalTimeout = 60.f;
 int8 g_channelExternalEncryptType = 0;
 
 uint32 g_SOMAXCONN = 5;
+
+// UDP²ÎÊý
+uint32						g_rudp_intWritePacketsQueueSize = 65535;
+uint32						g_rudp_intReadPacketsQueueSize = 65535;
+uint32						g_rudp_extWritePacketsQueueSize = 65535;
+uint32						g_rudp_extReadPacketsQueueSize = 65535;
+uint32						g_rudp_tickInterval = 10;
+uint32						g_rudp_minRTO = 10;
+uint32						g_rudp_missAcksResend = 1;
+uint32						g_rudp_mtu = 0;
+bool						g_rudp_congestionControl = false;
+bool						g_rudp_nodelay = true;
+
+const char*					UDP_HELLO = "62a559f3fa7748bc22f8e0766019d498";
+const char*					UDP_HELLO_ACK = "1432ad7c829170a76dd31982c3501eca";
 
 // network stats
 uint64						g_numPacketsSent = 0;
@@ -48,6 +65,10 @@ uint32						g_intReSendInterval = 10;
 uint32						g_intReSendRetries = 0;
 uint32						g_extReSendInterval = 10;
 uint32						g_extReSendRetries = 3;
+
+// Certificate file required for HTTPS/WSS/SSL communication
+std::string					g_sslCertificate = "";
+std::string					g_sslPrivateKey = "";
 
 bool initializeWatcher()
 {
@@ -78,8 +99,16 @@ void destroyObjPool()
 	UDPPacketReceiver::destroyObjPool();
 }
 
+bool initialize()
+{
+	return KB_SSL::initialize() && Http::initialize();
+}
+
 void finalise(void)
 {
+	Http::finalise();
+	KB_SSL::finalise();
+
 #ifdef ENABLE_WATCHERS
 	WatcherPaths::finalise();
 #endif
