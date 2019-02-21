@@ -424,17 +424,24 @@ void NetworkInterface::processChannels(KBEngine::Network::MessageHandlers* pMsgH
 		{
 			++iter;
 		}
-		else if(pChannel->isCondemn())
+		else if(pChannel->condemn() > 0)
 		{
 			++iter;
 
-			deregisterChannel(pChannel);
-			pChannel->destroy();
-			Network::Channel::reclaimPoolObject(pChannel);
+			if (pChannel->condemn() == Network::Channel::FLAG_CONDEMN_AND_WAIT_DESTROY && pChannel->sending())
+			{
+				pChannel->updateTick(pMsgHandlers);
+			}
+			else
+			{
+				deregisterChannel(pChannel);
+				pChannel->destroy();
+				Network::Channel::reclaimPoolObject(pChannel);
+			}
 		}
 		else
 		{
-			pChannel->processPackets(pMsgHandlers);
+			pChannel->updateTick(pMsgHandlers);
 			++iter;
 		}
 	}

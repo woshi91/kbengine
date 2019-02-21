@@ -27,6 +27,7 @@ along with KBEngine.  If not, see <http://www.gnu.org/licenses/>.
 #include "network/channel.h"	
 #include "network/fixed_messages.h"
 #include "client_lib/client_interface.h"
+#include "common/sha1.h"
 
 #ifndef CODE_INLINE
 #include "entity.inl"
@@ -76,9 +77,10 @@ creatingCell_(false),
 createdSpace_(false),
 inRestore_(false),
 pBufferedSendToClientMessages_(NULL),
-isDirty_(true),
 dbInterfaceIndex_(0)
 {
+	setDirty();
+
 	script::PyGC::incTracing("Entity");
 	ENTITY_INIT_PROPERTYS(Entity);
 
@@ -117,11 +119,11 @@ void Entity::onDefDataChanged(const PropertyDescription* propertyDescription,
 		return;
 
 	// 创建一个需要广播的模板流
-	MemoryStream* mstream = MemoryStream::createPoolObject();
+	MemoryStream* mstream = MemoryStream::createPoolObject(OBJECTPOOL_POINT);
 
 	propertyDescription->getDataType()->addToStream(mstream, pyData);
 
-	Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+	Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 	(*pBundle).newMessage(ClientInterface::onUpdatePropertys);
 	(*pBundle) << id();
 
@@ -145,8 +147,6 @@ void Entity::onDefDataChanged(const PropertyDescription* propertyDescription,
 //-------------------------------------------------------------------------------------
 void Entity::onDestroy(bool callScript)
 {
-	setDirty();
-	
 	if(callScript)
 	{
 		SCOPED_PROFILE(SCRIPTCALL_PROFILE);
@@ -174,7 +174,7 @@ void Entity::eraseEntityLog()
 	// 需要判断dbid是否大于0， 如果大于0则应该要去擦除在线等记录情况.
 	if(this->dbid() > 0)
 	{
-		Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+		Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 		(*pBundle).newMessage(DbmgrInterface::onEntityOffline);
 		(*pBundle) << this->dbid();
 		(*pBundle) << this->pScriptModule()->getUType();
@@ -497,7 +497,7 @@ bool Entity::destroyCellEntity(void)
 		return false;
 	}
 
-	Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+	Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 	(*pBundle).newMessage(CellappInterface::onDestroyCellEntityFromBaseapp);
 	(*pBundle) << id_;
 	sendToCellapp(pBundle);
@@ -551,11 +551,19 @@ PyObject* Entity::__py_pyDestroyEntity(PyObject* self, PyObject* args, PyObject 
 		return NULL;
 	}
 
-	if(pobj->creatingCell() || pobj->cellEntityCall() != NULL) 
+	if (pobj->creatingCell())
 	{
-		PyErr_Format(PyExc_Exception, "%s::destroy: id:%i has cell! creatingCell=%s\n", 
-			pobj->scriptName(), pobj->id(),
-			pobj->creatingCell() ? "true" : "false");
+		WARNING_MSG(fmt::format("{}::destroy(): id={} creating cell! automatic 'destroy' process will begin after 'onGetCell'.\n",
+			pobj->scriptName(), pobj->id()));
+
+		pobj->addFlags(ENTITY_FLAGS_DESTROY_AFTER_GETCELL);
+		S_Return;
+	}
+
+	if (pobj->cellEntityCall() != NULL)
+	{
+		PyErr_Format(PyExc_Exception, "%s::destroy: id:%i has cell, please destroyCellEntity() first!\n",
+			pobj->scriptName(), pobj->id());
 
 		PyErr_PrintEx(0);
 		return NULL;
@@ -618,7 +626,7 @@ void Entity::onDestroyEntity(bool deleteFromDB, bool writeToDB)
 			return;
 		}
 
-		Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+		Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 		(*pBundle).newMessage(DbmgrInterface::removeEntity);
 		
 		(*pBundle) << this->dbInterfaceIndex();
@@ -650,24 +658,6 @@ void Entity::onDestroyEntity(bool deleteFromDB, bool writeToDB)
 PyObject* Entity::onScriptGetAttribute(PyObject* attr)
 {
 	DEBUG_OP_ATTRIBUTE("get", attr)
-		
-	wchar_t* PyUnicode_AsWideCharStringRet0 = PyUnicode_AsWideCharString(attr, NULL);
-	char* ccattr = strutil::wchar2char(PyUnicode_AsWideCharStringRet0);
-	PyMem_Free(PyUnicode_AsWideCharStringRet0);
-	
-	// 如果访问了def持久化类容器属性
-	// 由于没有很好的监测容器类属性内部的变化，这里使用一个折中的办法进行标脏
-	PropertyDescription* pPropertyDescription = const_cast<ScriptDefModule*>(pScriptModule())->findPersistentPropertyDescription(ccattr);
-	if(pPropertyDescription && (pPropertyDescription->getFlags() & ENTITY_BASE_DATA_FLAGS) > 0)
-	{
-		setDirty();
-	}
-	else if (strcmp(ccattr, "cellData") == 0)
-	{
-		setDirty();
-	}
-	
-	free(ccattr);
 	return ScriptObject::onScriptGetAttribute(attr);
 }	
 
@@ -912,6 +902,14 @@ void Entity::onGetCell(Network::Channel* pChannel, COMPONENT_ID componentID)
 
 	if(!inRestore_)
 		SCRIPT_OBJECT_CALL_ARGS0(this, const_cast<char*>("onGetCell"), false);
+
+	if (!isDestroyed() && hasFlags(ENTITY_FLAGS_DESTROY_AFTER_GETCELL))
+	{
+		WARNING_MSG(fmt::format("{}::onGetCell(): Automatically destroy cell! id={}.\n",
+			this->scriptName(), this->id()));
+
+		destroyCellEntity();
+	}
 }
 
 //-------------------------------------------------------------------------------------
@@ -937,6 +935,14 @@ void Entity::onLoseCell(Network::Channel* pChannel, MemoryStream& s)
 	createdSpace_ = false;
 	
 	SCRIPT_OBJECT_CALL_ARGS0(this, const_cast<char*>("onLoseCell"), false);
+
+	if (!isDestroyed() && hasFlags(ENTITY_FLAGS_DESTROY_AFTER_GETCELL))
+	{
+		WARNING_MSG(fmt::format("{}::onLoseCell(): Automatically destroy! id={}.\n",
+			this->scriptName(), this->id()));
+
+		destroy();
+	}
 }
 
 //-------------------------------------------------------------------------------------
@@ -964,7 +970,7 @@ void Entity::reqBackupCellData()
 	if(mb == NULL)
 		return;
 
-	Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+	Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 	(*pBundle).newMessage(CellappInterface::reqBackupEntityCellData);
 	(*pBundle) << this->id();
 	sendToCellapp(pBundle);
@@ -1087,7 +1093,7 @@ void Entity::writeToDB(void* data, void* extra1, void* extra2)
 	}
 	else
 	{
-		Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+		Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 		(*pBundle).newMessage(CellappInterface::reqWriteToDBFromBaseapp);
 		(*pBundle) << this->id();
 		(*pBundle) << callbackID;
@@ -1144,7 +1150,7 @@ void Entity::onWriteToDBCallback(ENTITY_ID eid,
 		}
 		else
 		{
-			ERROR_MSG(fmt::format("{}::onWriteToDBCallback: can't found callback:{}.\n",
+			ERROR_MSG(fmt::format("{}::onWriteToDBCallback: not found callback:{}.\n",
 				this->scriptName(), callbackID));
 		}
 
@@ -1169,14 +1175,6 @@ void Entity::onCellWriteToDBCompleted(CALLBACK_ID callbackID, int8 shouldAutoLoa
 	// 如果在数据库中已经存在该entity则允许应用层多次调用写库进行数据及时覆盖需求
 	if(this->DBID_ > 0)
 		isArchiveing_ = false;
-	else
-		setDirty();
-	
-	// 如果数据没有改变那么不需要持久化
-	if(!isDirty())
-		return;
-	
-	setDirty(false);
 	
 	Components::COMPONENTS& cts = Components::getSingleton().getComponents(DBMGR_TYPE);
 	Components::ComponentInfos* dbmgrinfos = NULL;
@@ -1191,10 +1189,45 @@ void Entity::onCellWriteToDBCompleted(CALLBACK_ID callbackID, int8 shouldAutoLoa
 		return;
 	}
 	
-	MemoryStream* s = MemoryStream::createPoolObject();
-	addPersistentsDataToStream(ED_FLAG_ALL, s);
+	MemoryStream* s = MemoryStream::createPoolObject(OBJECTPOOL_POINT);
 
-	Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+	try
+	{
+		addPersistentsDataToStream(ED_FLAG_ALL, s);
+	}
+	catch (MemoryStreamWriteOverflow & err)
+	{
+		ERROR_MSG(fmt::format("{}::onCellWriteToDBCompleted({}): {}\n",
+			this->scriptName(), this->id(), err.what()));
+
+		MemoryStream::reclaimPoolObject(s);
+		return;
+	}
+
+	if (s->length() == 0)
+	{
+		MemoryStream::reclaimPoolObject(s);
+		return;
+	}
+
+	KBE_SHA1 sha;
+	uint32 digest[5];
+
+	sha.Input(s->data(), s->length());
+	sha.Result(digest);
+
+	// 检查数据是否有变化，有变化则将数据备份并且记录数据hash，没变化什么也不做
+	if (memcmp((void*)&persistentDigest_[0], (void*)&digest[0], sizeof(persistentDigest_)) == 0)
+	{
+		MemoryStream::reclaimPoolObject(s);
+		return;
+	}
+	else
+	{
+		setDirty((uint32*)&digest[0]);
+	}
+
+	Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 	(*pBundle).newMessage(DbmgrInterface::writeEntity);
 
 	(*pBundle) << g_componentID;
@@ -1360,7 +1393,7 @@ void Entity::forwardEntityMessageToCellappFromClient(Network::Channel* pChannel,
 
 	// 将这个消息再打包转寄给cellapp， cellapp会对这个包中的每个消息进行判断
 	// 检查是否是entity消息， 否则不合法.
-	Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+	Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 	(*pBundle).newMessage(CellappInterface::forwardEntityMessageToCellappFromClient);
 	(*pBundle) << this->id();
 	(*pBundle).append(s);
@@ -1427,7 +1460,7 @@ PyObject* Entity::pyTeleport(PyObject* baseEntityMB)
 
 		eid = mb->id();
 
-		Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+		Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 		(*pBundle).newMessage(BaseappInterface::reqTeleportOther);
 		(*pBundle) << eid;
 
@@ -1531,7 +1564,7 @@ void Entity::reqTeleportOther(Network::Channel* pChannel, ENTITY_ID reqTeleportE
 		return;
 	}
 
-	Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+	Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 	(*pBundle).newMessage(CellappInterface::teleportFromBaseapp);
 	(*pBundle) << reqTeleportEntityID;
 
@@ -1598,7 +1631,7 @@ void Entity::onMigrationCellappOver(COMPONENT_ID targetCellAppID)
 	Components::ComponentInfos* pInfos = Components::getSingleton().findComponent(targetCellAppID);
 	if (pInfos && pInfos->pChannel)
 	{
-		Network::Bundle* pBundle = Network::Bundle::createPoolObject();
+		Network::Bundle* pBundle = Network::Bundle::createPoolObject(OBJECTPOOL_POINT);
 		(*pBundle).newMessage(CellappInterface::reqTeleportToCellAppOver);
 		(*pBundle) << id();
 		pInfos->pChannel->send(pBundle);

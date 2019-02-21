@@ -72,7 +72,7 @@ public:
 	bool initializeEnd();
 	void finalise();
 
-	virtual bool canShutdown();
+	virtual ShutdownHandler::CAN_SHUTDOWN_STATE canShutdown();
 	virtual void onShutdown(bool first);
 
 	void destroyObjPool();
@@ -96,7 +96,7 @@ public:
 	static PyObject* __py_createEntity(PyObject* self, PyObject* args);
 
 	/** 
-		想dbmgr请求执行一个数据库命令
+		向dbmgr请求执行一个数据库命令
 	*/
 	static PyObject* __py_executeRawDatabaseCommand(PyObject* self, PyObject* args);
 	void executeRawDatabaseCommand(const char* datas, uint32 size, PyObject* pycallback, ENTITY_ID eid, const std::string& dbInterfaceName);

@@ -332,7 +332,8 @@ bool ClientSDKUE4::writeEngineMessagesModuleBegin()
 	strutil::kbe_replace(fileBody(), "#REPLACE#", "");
 
 	fileBody() += "#pragma once\n\n";
-	fileBody() += "#include \"KBECommon.h\"\n\n";
+	fileBody() += "#include \"KBECommon.h\"\n";
+	fileBody() += "#include \"MemoryStream.h\"\n\n";
 
 	fileBody() += "// engine-c++ messages\n\n";
 	fileBody() += fmt::format("class KBENGINEPLUGINS_API {}\n{{\npublic:", "Message");
@@ -1306,7 +1307,7 @@ bool ClientSDKUE4::writeCustomDataType(const DataType* pDataType)
 		}
 
 		std::string readName;
-		fileBody() += fmt::format("\nclass KBENGINEPLUGINS_API DATATYPE_{} : DATATYPE_BASE\n{{\n", className);
+		fileBody() += fmt::format("\nclass KBENGINEPLUGINS_API DATATYPE_{} : DATATYPE_BASE\n{{\npublic:\n\n", className);
 
 		bool isFixedType = strcmp(pFixedArrayType->getDataType()->getName(), "FIXED_DICT") == 0 ||
 			strcmp(pFixedArrayType->getDataType()->getName(), "ARRAY") == 0;
@@ -1457,6 +1458,13 @@ bool ClientSDKUE4::writeEntityDefsModuleInitScript_ScriptModule(ScriptDefModule*
 //-------------------------------------------------------------------------------------
 bool ClientSDKUE4::writeEntityDefsModuleInitScript_MethodDescr(ScriptDefModule* pScriptDefModule, MethodDescription* pDescr, COMPONENT_TYPE componentType)
 {
+	// 如果pDescr为None，并且是客户端方法，那么需要强制设定useMethodDescrAlias为true，否则默认为false将会出现问题
+	if (!pDescr && componentType == CLIENT_TYPE)
+	{
+		fileBody() += fmt::format("\tp{}Module->useMethodDescrAlias = true;\n", pScriptDefModule->getName());
+		return true;
+	}
+
 	fileBody() += fmt::format("\tTArray<DATATYPE_BASE*> {}_{}_args;\n", pScriptDefModule->getName(), pDescr->getName());
 
 	const std::vector<DataType*>& args = pDescr->getArgTypes();
@@ -2109,15 +2117,15 @@ bool ClientSDKUE4::writeEntityProcessMessagesMethod(ScriptDefModule* pEntityScri
 							pDataType->aliasName(), pMethodDescription->getName(), i);
 
 						fileBody() += fmt::format("\t\t\t((DATATYPE_{}*)pMethod->args[{}])->createFromStreamEx(stream, {}_arg{});\n",
-							pDataType->aliasName(), (i - 1), pDataType->aliasName(), pMethodDescription->getName(), i);
+							pDataType->aliasName(), (i - 1), pMethodDescription->getName(), i);
 					}
 					else
 					{
 						fileBody() += fmt::format("\t\t\t{} {}_arg{};\n",
 							typestr, pMethodDescription->getName(), i);
 
-						fileBody() += fmt::format("\t\t\t((DATATYPE_AnonymousArray_{}*)pMethod->args[{}]).createFromStreamEx(stream, {} {}_arg{});\n",
-							typeID, (i - 1), typestr, pMethodDescription->getName(), i);
+						fileBody() += fmt::format("\t\t\t((DATATYPE_AnonymousArray_{}*)pMethod->args[{}]).createFromStreamEx(stream, {}_arg{});\n",
+							typeID, (i - 1), pMethodDescription->getName(), i);
 					}
 				}
 				else
@@ -2193,7 +2201,7 @@ bool ClientSDKUE4::writeEntityProcessMessagesMethod(ScriptDefModule* pEntityScri
 
 	ScriptDefModule::PROPERTYDESCRIPTION_MAP clientPropertys = pEntityScriptDefModule->getClientPropertyDescriptions();
 
-	if (clientPropertys.size() > 0)
+	//if (clientPropertys.size() > 0)
 	{
 		fileBody() += fmt::format("\tswitch(pProp->properUtype)\n\t{{\n");
 
@@ -2223,7 +2231,7 @@ bool ClientSDKUE4::writeEntityProcessMessagesMethod(ScriptDefModule* pEntityScri
 				{
 					fileBody() += fmt::format("\t\tcase {}:\n\t\t{{\n", pPropertyDescription->getUType());
 					fileBody() += fmt::format("\t\t\tstream.readUint32();\n");
-					fileBody() += fmt::format("\t\t\tbreak;\n\t\t}}\n");
+					fileBody() += fmt::format("\t\t\tbreak;\n\t\t\t}}\n");
 					continue;
 				}
 				else
@@ -2567,7 +2575,7 @@ bool ClientSDKUE4::writeEntityProperty_ARRAY(ScriptDefModule* pEntityScriptDefMo
 
 		bool ret = writeTypeItemType_ARRAY(pPropertyDescription->getName(), pPropertyDescription->getDataType()->aliasName(), pPropertyDescription->getDataType());
 		std::vector<std::string> values;
-		values = KBEngine::strutil::kbe_splits(fileBody(), " ");
+		KBEngine::strutil::kbe_splits(fileBody(), " ", values);
 		fileBody() = s + fileBody();
 
 		std::string name = pPropertyDescription->getName();

@@ -171,7 +171,7 @@ inline PyObject* IntType<uint8>::parseDefaultStr(std::string defaultVal)
 	if (PyErr_Occurred()) 
 	{
 		PyErr_Clear();
-		PyErr_Format(PyExc_TypeError, "UINT8Type::parseDefaultStr: defaultVal(%s) is error! val=[%s]", 
+		PyErr_Format(PyExc_TypeError, "UINT8Type::parseDefaultStr: defaultVal(%s) error! val=[%s]", 
 			pyval != NULL ? pyval->ob_type->tp_name : "NULL", defaultVal.c_str());
 
 		PyErr_PrintEx(0);
@@ -200,7 +200,7 @@ inline PyObject* IntType<uint16>::parseDefaultStr(std::string defaultVal)
 	if (PyErr_Occurred()) 
 	{
 		PyErr_Clear();
-		PyErr_Format(PyExc_TypeError, "UINT16Type::parseDefaultStr: defaultVal(%s) is error! val=[%s]", 
+		PyErr_Format(PyExc_TypeError, "UINT16Type::parseDefaultStr: defaultVal(%s) error! val=[%s]", 
 			pyval != NULL ? pyval->ob_type->tp_name : "NULL", defaultVal.c_str());
 
 		PyErr_PrintEx(0);
@@ -229,7 +229,7 @@ inline PyObject* IntType<uint32>::parseDefaultStr(std::string defaultVal)
 	if (PyErr_Occurred()) 
 	{
 		PyErr_Clear();
-		PyErr_Format(PyExc_TypeError, "UINT32Type::parseDefaultStr: defaultVal(%s) is error! val=[%s]", 
+		PyErr_Format(PyExc_TypeError, "UINT32Type::parseDefaultStr: defaultVal(%s) error! val=[%s]", 
 			pyval != NULL ? pyval->ob_type->tp_name : "NULL", defaultVal.c_str());
 
 		PyErr_PrintEx(0);
@@ -258,7 +258,7 @@ inline PyObject* IntType<int8>::parseDefaultStr(std::string defaultVal)
 	if (PyErr_Occurred()) 
 	{
 		PyErr_Clear();
-		PyErr_Format(PyExc_TypeError, "INT8Type::parseDefaultStr: defaultVal(%s) is error! val=[%s]", 
+		PyErr_Format(PyExc_TypeError, "INT8Type::parseDefaultStr: defaultVal(%s) error! val=[%s]", 
 			pyval != NULL ? pyval->ob_type->tp_name : "NULL", defaultVal.c_str());
 
 		PyErr_PrintEx(0);
@@ -287,7 +287,7 @@ inline PyObject* IntType<int16>::parseDefaultStr(std::string defaultVal)
 	if (PyErr_Occurred()) 
 	{
 		PyErr_Clear();
-		PyErr_Format(PyExc_TypeError, "INT16Type::parseDefaultStr: defaultVal(%s) is error! val=[%s]", 
+		PyErr_Format(PyExc_TypeError, "INT16Type::parseDefaultStr: defaultVal(%s) error! val=[%s]", 
 			pyval != NULL ? pyval->ob_type->tp_name : "NULL", defaultVal.c_str());
 
 		PyErr_PrintEx(0);
@@ -316,7 +316,7 @@ inline PyObject* IntType<int32>::parseDefaultStr(std::string defaultVal)
 	if (PyErr_Occurred()) 
 	{
 		PyErr_Clear();
-		PyErr_Format(PyExc_TypeError, "INT32Type::parseDefaultStr: defaultVal(%s) is error! val=[%s]", 
+		PyErr_Format(PyExc_TypeError, "INT32Type::parseDefaultStr: defaultVal(%s) error! val=[%s]", 
 			pyval != NULL ? pyval->ob_type->tp_name : "NULL", defaultVal.c_str());
 
 		PyErr_PrintEx(0);
@@ -699,6 +699,7 @@ public:
 
 	typedef KBEShared_ptr< DictItemDataType > DictItemDataTypePtr;
 	typedef std::vector< std::pair< std::string, DictItemDataTypePtr > > FIXEDDICT_KEYTYPE_MAP;
+
 public:	
 	FixedDictType(DATATYPE_UID did = 0);
 	virtual ~FixedDictType();
@@ -744,6 +745,7 @@ public:
 		加载impl模块
 	*/
 	bool loadImplModule(std::string moduleName);
+	bool setImplModule(PyObject* pyobj);
 
 	/** 
 		impl相关实现
@@ -758,6 +760,8 @@ public:
 
 	std::string& moduleName(){ return moduleName_; }
 	
+	std::string getNotFoundKeys(PyObject* dict);
+
 protected:
 	// 这个固定字典里的各个key的类型
 	FIXEDDICT_KEYTYPE_MAP			keyTypes_;				
@@ -852,7 +856,7 @@ void IntType<SPECIFY_TYPE>::addToStream(MemoryStream* mstream,
 		if(PyErr_Occurred())
 		{
 			PyErr_Clear();
-			PyErr_Format(PyExc_TypeError, "IntType::addToStream: pyValue(%s) is error!", 
+			PyErr_Format(PyExc_TypeError, "IntType::addToStream: pyValue(%s) error!", 
 				(pyValue == NULL) ? "NULL": pyValue->ob_type->tp_name);
 
 			PyErr_PrintEx(0);
